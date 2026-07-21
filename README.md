@@ -5,11 +5,13 @@ fund transfers between accounts.
 
 Built for the 3Line Limited Senior Backend Engineer assessment, on the provided Spring Boot starter.
 
-**Java 17 · Spring Boot 3.5 · Spring Data JPA · Flyway · PostgreSQL**
+**Java 17 · Spring Boot 3.5 · Spring Data JPA · Flyway · PostgreSQL · Redis**
 
-PostgreSQL is the only database, in development and in tests alike. Row-level `SELECT FOR UPDATE`
-is the mechanism that makes concurrent transfers correct, so the tests exercise the real thing
-rather than an in-memory substitute that only approximates it.
+PostgreSQL is the only system of record, in development and in tests alike. Row-level
+`SELECT FOR UPDATE` is the mechanism that makes concurrent transfers correct, so the tests exercise
+the real thing rather than an in-memory substitute that only approximates it. Redis is a cache in
+front of read-heavy endpoints, and nothing depends on it for correctness — the application runs
+without it.
 
 ---
 
@@ -18,14 +20,17 @@ rather than an in-memory substitute that only approximates it.
 ### With Docker
 
 ```bash
-docker compose up          # PostgreSQL 16 + the app, on port 9090
+docker compose up          # PostgreSQL 16 + Redis 7 + the app, on port 9090
 ```
 
-`docker compose` supplies every environment variable the app needs, so nothing else is required.
+`docker compose` starts PostgreSQL, Redis and the application, and supplies every environment
+variable, so nothing else is required.
 
 ### With a local PostgreSQL
 
 ```bash
+redis-server --daemonize yes                # or: brew services start redis
+
 psql -d postgres -c "CREATE ROLE wallet LOGIN SUPERUSER PASSWORD 'wallet';"
 createdb -O wallet wallet
 createdb -O wallet wallet_test             # used by the test suite
@@ -63,6 +68,11 @@ it quietly connect somewhere unintended. `.env.example` lists every one:
 | `DB_USERNAME` / `DB_PASSWORD` | Credentials | `wallet` / `wallet` |
 | `DB_POOL_SIZE` | Hikari maximum pool size | `10` |
 | `DB_CONNECTION_TIMEOUT_MS` | Connection acquisition timeout | `10000` |
+| `CACHE_TYPE` | `redis` in any real deployment; `none` disables caching entirely | `redis` |
+| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | Redis connection | `localhost` / `6379` / _(empty)_ |
+| `REDIS_TIMEOUT_MS` | Command timeout | `2000` |
+| `REDIS_POOL_MAX_ACTIVE` / `REDIS_POOL_MAX_IDLE` / `REDIS_POOL_MIN_IDLE` | Lettuce pool sizing | `16` / `8` / `2` |
+| `WALLET_CACHE_TTL_SECONDS` | Cache entry lifetime | `300` |
 | `SERVER_PORT` | HTTP port | `9090` |
 | `WALLET_INSTITUTION_CODE` | This institution's 6-digit code, used as the NUBAN check-digit seed | `000999` |
 | `WALLET_INSTITUTION_NAME` | Display name for house accounts | `3Line Wallet` |
@@ -114,8 +124,10 @@ export TEST_DB_PASSWORD=wallet
 ./mvnw verify                                         # 49 tests
 ```
 
-CI runs the same command against a PostgreSQL service container, then boots the application to
-confirm it starts against a real database.
+Tests run with `CACHE_TYPE=none`, so **Redis is not needed to run them**. Caching is a performance
+concern, not a correctness one — the assertions are about money movement, and disabling the cache
+keeps the suite deterministic. CI runs the same command against PostgreSQL and Redis service
+containers, then boots the application to confirm it starts against both.
 
 ---
 
@@ -347,9 +359,39 @@ places and **rejects** greater precision rather than silently rounding it.
 
 ### Caching
 
-Account name lookups are cached (Caffeine, 5-minute TTL). Balances used to authorise a debit are
-never cached — always read from the primary, under lock, inside the transaction. The governing rule
-is that a cache may only make the system fail faster, never succeed wrongly.
+Redis, shared across every application instance. The governing rule:
+
+> **A cache may only make the system fail faster. It may never make it succeed wrongly.**
+
+| Data | Cached | Why |
+|---|---|---|
+| Name enquiry | **Yes**, 5 min | The highest-volume read in the system — a client resolves a name before every transfer, often several times while a user types |
+| Account detail | **Yes**, 5 min | Read-heavy, and changes rarely |
+| **Balance used to authorise a debit** | **Never** | Read from the primary, under a row lock, inside the transaction |
+
+The last row is the important one. A cached balance behind a debit decision is how double-spends
+get built, so the *authorization balance* and the *display balance* are treated as different things:
+the balance endpoint reads the database every time.
+
+Caching an account's `status` is still safe even though a frozen account could briefly appear
+`ACTIVE` in the cache, because `LedgerService` re-reads the status from the locked row inside the
+transaction before moving any money. The cache can therefore only reject a request earlier than the
+database would — never approve one it shouldn't.
+
+Redis rather than an in-process cache is a deliberate choice for horizontal scale. An in-process
+cache is per-instance: with N instances you get N cold caches, N times the database load on a
+restart, and instances disagreeing with each other. The cost is a network hop per lookup, which is
+the right trade at this read volume but would not be for something called once per request.
+
+**Redis being down does not take the wallet down.** A `CacheErrorHandler` degrades every cache
+failure — read, write, evict, clear — to a logged warning and a database read. Spring's default is
+to propagate the exception, which would turn a cache outage into a full outage.
+
+Two further details for high volume: `@Cacheable(sync = true)` collapses concurrent misses on the
+same key so a cold hot key produces one database query rather than hundreds, and values are
+serialised as JSON with a type allow-list restricted to this application's own packages, since
+unrestricted polymorphic deserialisation from a cache is a known remote-code-execution vector if the
+store is ever compromised.
 
 ---
 
@@ -365,6 +407,8 @@ is that a cache may only make the system fail faster, never succeed wrongly.
 | Uniqueness enforced by database indexes | An application-level `existsBy` check before insert is itself a race |
 | PostgreSQL | Row-level `SELECT FOR UPDATE` *is* the correctness mechanism; exact `NUMERIC`; constraints as a last line of defence |
 | PostgreSQL in tests too, not an in-memory substitute | An in-memory database approximates `SELECT FOR UPDATE` rather than implementing it, so a green suite against one would not prove the concurrency behaviour this system depends on |
+| Redis rather than an in-process cache | An in-process cache is per-instance: N instances mean N cold caches, N times the database load after a deploy, and instances disagreeing with each other |
+| Cache failures degrade to a database read | Spring propagates cache exceptions by default, which would turn a Redis restart into a wallet outage |
 | Request DTOs, never entities, at the API boundary | Avoids mass assignment |
 | Keyset pagination on statements | `OFFSET 50000` makes PostgreSQL walk and discard 50,000 rows |
 
@@ -428,7 +472,7 @@ The base package `com.example.test` and the Maven coordinates were kept as provi
 
 ```
 src/main/java/com/example/test
-├── config/          WalletProperties, OpenAPI, Caffeine cache, demo seeder
+├── config/          WalletProperties, OpenAPI, Redis cache, demo seeder
 ├── common/          ApiResponse envelope, correlation-id filter, Money
 ├── controller/      Users, Accounts, Transfers
 ├── dto/             Request and response records
