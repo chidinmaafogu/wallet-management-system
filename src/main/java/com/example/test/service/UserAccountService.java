@@ -102,12 +102,14 @@ public class UserAccountService {
                 .orElseThrow(() -> WalletException.accountNotFound(accountNumber));
     }
 
+    @Cacheable(cacheNames = CacheConfig.ACCOUNTS, key = "#accountNumber", sync = true)
     @Transactional(readOnly = true)
     public AccountResponse findAccount(String accountNumber) {
         return AccountResponse.from(requireAccount(properties.institutionCode(), accountNumber));
     }
 
-    @Cacheable(cacheNames = CacheConfig.ACCOUNTS, key = "#institutionCode + ':' + #accountNumber")
+    @Cacheable(cacheNames = CacheConfig.NAME_ENQUIRY,
+            key = "#institutionCode + ':' + #accountNumber", sync = true)
     @Transactional(readOnly = true)
     public NameEnquiryResponse nameEnquiry(String institutionCode, String accountNumber) {
         Account account = requireAccount(institutionCode, accountNumber);
