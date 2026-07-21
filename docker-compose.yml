@@ -1,0 +1,67 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: wallet-postgres
+    environment:
+      POSTGRES_DB: wallet
+      POSTGRES_USER: wallet
+      POSTGRES_PASSWORD: wallet
+    ports:
+      - "5432:5432"
+    volumes:
+      - wallet-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wallet -d wallet"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: wallet-redis
+    command: ["redis-server", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    container_name: wallet-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/wallet
+      CACHE_TYPE: redis
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ""
+      REDIS_TIMEOUT_MS: "2000"
+      REDIS_POOL_MAX_ACTIVE: "16"
+      REDIS_POOL_MAX_IDLE: "8"
+      REDIS_POOL_MIN_IDLE: "2"
+      WALLET_CACHE_TTL_SECONDS: "300"
+      DB_USERNAME: wallet
+      DB_PASSWORD: wallet
+      DB_POOL_SIZE: "10"
+      DB_CONNECTION_TIMEOUT_MS: "10000"
+      SERVER_PORT: "9090"
+      WALLET_INSTITUTION_CODE: "000999"
+      WALLET_INSTITUTION_NAME: 3Line Wallet
+      WALLET_DEFAULT_CURRENCY: NGN
+      WALLET_SYSTEM_FUNDING_ACCOUNT: "0000000000"
+      WALLET_MIN_TRANSFER_AMOUNT: "0.01"
+      WALLET_MAX_TRANSFER_AMOUNT: "1000000.00"
+      WALLET_LOCK_TIMEOUT_MS: "5000"
+      WALLET_SEED_DEMO_DATA: "true"
+    ports:
+      - "9090:9090"
+
+volumes:
+  wallet-pgdata:
