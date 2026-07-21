@@ -1,0 +1,70 @@
+spring:
+  application:
+    name: wallet-system
+
+  datasource:
+    url: ${DB_URL}
+    driver-class-name: org.postgresql.Driver
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    hikari:
+      pool-name: wallet-pool
+      maximum-pool-size: ${DB_POOL_SIZE}
+      connection-timeout: ${DB_CONNECTION_TIMEOUT_MS}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-bigdecimal-as-plain: true
+
+server:
+  port: ${SERVER_PORT}
+  error:
+    include-message: never
+    include-stacktrace: never
+
+wallet:
+  institution-code: ${WALLET_INSTITUTION_CODE}
+  institution-name: ${WALLET_INSTITUTION_NAME}
+  default-currency: ${WALLET_DEFAULT_CURRENCY}
+  system-funding-account: ${WALLET_SYSTEM_FUNDING_ACCOUNT}
+  min-transfer-amount: ${WALLET_MIN_TRANSFER_AMOUNT}
+  max-transfer-amount: ${WALLET_MAX_TRANSFER_AMOUNT}
+  lock-timeout-millis: ${WALLET_LOCK_TIMEOUT_MS}
+  seed-demo-data: ${WALLET_SEED_DEMO_DATA}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    com.example.test: INFO
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%X{correlationId:-}] %logger{40} - %msg%n"
