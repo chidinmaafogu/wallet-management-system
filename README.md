@@ -121,7 +121,7 @@ export TEST_DB_URL=jdbc:postgresql://localhost:5432/wallet_test
 export TEST_DB_USERNAME=wallet
 export TEST_DB_PASSWORD=wallet
 
-./mvnw verify                                         # 49 tests
+./mvnw verify                                         # 45 tests
 ```
 
 Tests run with `CACHE_TYPE=none`, so **Redis is not needed to run them**. Caching is a performance
@@ -494,14 +494,34 @@ failure-mode analysis, the full race-condition inventory, and the indexing ratio
 
 ## Tests
 
-| Test | What it proves |
-|---|---|
-| `ConcurrentTransferTest` | 200 simultaneous bidirectional transfers conserve every kobo; no deadlock; no overdraw, under real PostgreSQL row locks |
-| `IdempotencyTest` | Replay returns the original receipt; no double debit; key reuse with a changed payload rejected; unknown outcome resolvable |
-| `TransactionRollbackTest` | A failure mid-ledger reverts everything; unbalanced legs write nothing |
-| `LedgerInvariantTest` | Books sum to zero; cached balance equals the ledger for every account |
-| `NubanGeneratorTest` | Check digit against the published CBN vector; the wrong variant rejected |
-| `AccountResolutionTest` | The same NUBAN under two institution codes is two different accounts |
-| `TransferIntegrationTest` | Full HTTP surface: happy path, declines, validation, name enquiry, statement |
+45 tests: 13 unit, 32 integration.
+
+### Unit — no Spring context, no database
+
+| Test | Count | What it proves |
+|---|---|---|
+| `NubanGeneratorTest` | 10 | Check digit against the published CBN vector; the incorrect 13-digit variant rejected; mistyped numbers caught; the 9-digit serial range enforced |
+| `TransactionProcessorFactoryTest` | 3 | The right processor resolves per transaction type; duplicate and missing registrations fail loudly |
+
+### Integration — `@SpringBootTest` against a real PostgreSQL database
+
+| Test | Count | What it proves |
+|---|---|---|
+| `TransferIntegrationTest` | 14 | Full HTTP surface: happy path, declines, validation, foreign bank code, name enquiry, statement, funding |
+| `IdempotencyTest` | 5 | Replay returns the original receipt; no double debit; key reuse with a changed payload rejected; a declined key stays declined; unknown outcome resolvable by key |
+| `AccountResolutionTest` | 4 | The same NUBAN under two institution codes is two different accounts |
+| `LedgerInvariantTest` | 4 | Books sum to zero; cached balance equals the ledger for every account; every entry carries its running balance |
+| `TransactionRollbackTest` | 3 | A failure mid-ledger reverts the debit, the credit and the transaction row; unbalanced legs write nothing |
+| `ConcurrentTransferTest` | 2 | 200 simultaneous bidirectional transfers conserve every kobo, never deadlock and never overdraw, under real row locks |
 
 The concurrency, idempotency and rollback tests are the ones worth reading first.
+
+The balance is deliberate. Concurrency, transaction rollback and idempotency cannot be demonstrated
+with mocks — a mocked repository will happily pretend two threads never collided. Those properties
+are the ones this system lives or dies by, so they are tested against a real database and real row
+locks, and the suite is weighted accordingly.
+
+The gap this leaves, stated plainly: the pure validation rules — insufficient funds, same-account,
+transfer limits, currency mismatch — are currently exercised through the full HTTP stack rather than
+by fast isolated unit tests of the service layer. That is slower feedback than it needs to be, and a
+mocked `TransferProcessor` suite would be the first thing to add next.

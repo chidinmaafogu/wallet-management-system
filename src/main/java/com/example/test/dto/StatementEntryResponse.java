@@ -5,7 +5,7 @@ import com.example.test.model.LedgerEntry;
 import com.example.test.model.enums.LedgerDirection;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 public record StatementEntryResponse(
         Long entryId,
@@ -15,7 +15,7 @@ public record StatementEntryResponse(
         BigDecimal balanceBefore,
         BigDecimal balanceAfter,
         String narration,
-        LocalDateTime createdAt
+        Instant createdAt
 ) {
     public static StatementEntryResponse from(LedgerEntry entry) {
         return new StatementEntryResponse(

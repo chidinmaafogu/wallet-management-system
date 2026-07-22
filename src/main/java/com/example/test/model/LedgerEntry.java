@@ -21,7 +21,7 @@ import org.hibernate.annotations.CreationTimestamp;
 
 import java.io.Serializable;
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Objects;
 
 @Entity
@@ -63,7 +63,7 @@ public class LedgerEntry implements Serializable {
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
-    private LocalDateTime createdAt;
+    private Instant createdAt;
 
     public BigDecimal signedAmount() {
         return direction == LedgerDirection.CREDIT ? amount : amount.negate();

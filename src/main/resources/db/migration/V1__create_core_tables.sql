@@ -4,8 +4,8 @@ CREATE TABLE users (
     last_name    VARCHAR(80)  NOT NULL,
     email        VARCHAR(150) NOT NULL,
     phone_number VARCHAR(20)  NOT NULL,
-    created_at   TIMESTAMP    NOT NULL,
-    updated_at   TIMESTAMP
+    created_at   TIMESTAMPTZ  NOT NULL,
+    updated_at   TIMESTAMPTZ
 );
 
 CREATE UNIQUE INDEX ux_users_email ON users (email);
@@ -19,8 +19,8 @@ CREATE TABLE accounts (
     account_type     VARCHAR(20) NOT NULL,
     currency         VARCHAR(3)  NOT NULL,
     status           VARCHAR(20) NOT NULL,
-    created_at       TIMESTAMP   NOT NULL,
-    updated_at       TIMESTAMP,
+    created_at       TIMESTAMPTZ NOT NULL,
+    updated_at       TIMESTAMPTZ,
     CONSTRAINT fk_accounts_user FOREIGN KEY (user_id) REFERENCES users (id)
 );
 
@@ -32,7 +32,7 @@ CREATE TABLE wallet_balances (
     account_id BIGINT        NOT NULL,
     balance    NUMERIC(19,4) NOT NULL DEFAULT 0,
     version    BIGINT        NOT NULL DEFAULT 0,
-    updated_at TIMESTAMP,
+    updated_at TIMESTAMPTZ,
     CONSTRAINT fk_wallet_balances_account FOREIGN KEY (account_id) REFERENCES accounts (id)
 );
 

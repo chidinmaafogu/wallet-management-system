@@ -5,7 +5,7 @@ import com.example.test.model.enums.AccountStatus;
 import com.example.test.model.enums.AccountType;
 import com.example.test.model.enums.Currency;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 public record AccountResponse(
         String accountNumber,
@@ -14,7 +14,7 @@ public record AccountResponse(
         AccountType accountType,
         Currency currency,
         AccountStatus status,
-        LocalDateTime createdAt
+        Instant createdAt
 ) {
     public static AccountResponse from(Account account) {
         return new AccountResponse(

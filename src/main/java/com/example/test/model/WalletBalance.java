@@ -19,7 +19,7 @@ import org.hibernate.annotations.UpdateTimestamp;
 
 import java.io.Serializable;
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Objects;
 
 @Entity
@@ -49,7 +49,7 @@ public class WalletBalance implements Serializable {
 
     @UpdateTimestamp
     @Column(name = "updated_at")
-    private LocalDateTime updatedAt;
+    private Instant updatedAt;
 
     public boolean canCover(BigDecimal amount) {
         return balance.compareTo(amount) >= 0;

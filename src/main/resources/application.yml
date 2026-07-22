@@ -46,6 +46,7 @@ spring:
     default-property-inclusion: non_null
     serialization:
       write-bigdecimal-as-plain: true
+      write-dates-as-timestamps: false
 
 server:
   port: ${SERVER_PORT}
@@ -63,6 +64,7 @@ wallet:
   lock-timeout-millis: ${WALLET_LOCK_TIMEOUT_MS}
   cache-ttl-seconds: ${WALLET_CACHE_TTL_SECONDS}
   seed-demo-data: ${WALLET_SEED_DEMO_DATA}
+  timezone: ${WALLET_TIMEZONE:}
 
 springdoc:
   swagger-ui:

@@ -7,7 +7,7 @@ import com.example.test.model.enums.TransactionStatus;
 import com.example.test.model.enums.TransactionType;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 public record TransactionResponse(
         String reference,
@@ -20,8 +20,8 @@ public record TransactionResponse(
         String narration,
         String failureReason,
         BigDecimal sourceBalanceAfter,
-        LocalDateTime createdAt,
-        LocalDateTime completedAt
+        Instant createdAt,
+        Instant completedAt
 ) {
     public static TransactionResponse from(WalletTransaction transaction, BigDecimal sourceBalanceAfter) {
         return new TransactionResponse(

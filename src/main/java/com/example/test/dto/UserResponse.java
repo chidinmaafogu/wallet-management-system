@@ -2,7 +2,7 @@ package com.example.test.dto;
 
 import com.example.test.model.User;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 public record UserResponse(
@@ -12,7 +12,7 @@ public record UserResponse(
         String email,
         String phoneNumber,
         List<AccountResponse> accounts,
-        LocalDateTime createdAt
+        Instant createdAt
 ) {
     public static UserResponse from(User user, List<AccountResponse> accounts) {
         return new UserResponse(

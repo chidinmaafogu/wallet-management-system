@@ -11,7 +11,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.time.Clock;
+import java.time.Instant;
 
 @Slf4j
 @Service
@@ -19,6 +20,7 @@ import java.time.LocalDateTime;
 public class FailedTransactionRecorder {
 
     private final WalletTransactionRepo walletTransactionRepo;
+    private final Clock clock;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public void record(TransactionContext context, WalletException failure) {
@@ -35,7 +37,7 @@ public class FailedTransactionRecorder {
                     .currency(context.currency())
                     .narration(context.narration())
                     .failureReason(failure.getErrorCode().name())
-                    .completedAt(LocalDateTime.now())
+                    .completedAt(Instant.now(clock))
                     .build());
             log.warn("Recorded declined {} reference={} reason={}",
                     context.type(), context.reference(), failure.getErrorCode());

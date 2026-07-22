@@ -18,7 +18,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -35,6 +36,7 @@ public class LedgerService {
     private final WalletBalanceRepo walletBalanceRepo;
     private final WalletTransactionRepo walletTransactionRepo;
     private final LedgerEntryRepo ledgerEntryRepo;
+    private final Clock clock;
 
     @Transactional(rollbackFor = Exception.class)
     public WalletTransaction post(TransactionContext context, List<LedgerLeg> legs) {
@@ -54,7 +56,7 @@ public class LedgerService {
                 .amount(context.amount())
                 .currency(context.currency())
                 .narration(context.narration())
-                .completedAt(LocalDateTime.now())
+                .completedAt(Instant.now(clock))
                 .build());
 
         Map<Long, BigDecimal> running = new HashMap<>();

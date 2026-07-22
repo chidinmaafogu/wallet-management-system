@@ -11,8 +11,8 @@ CREATE TABLE wallet_transactions (
     currency               VARCHAR(3)    NOT NULL,
     narration              VARCHAR(255),
     failure_reason         VARCHAR(64),
-    created_at             TIMESTAMP     NOT NULL,
-    completed_at           TIMESTAMP,
+    created_at             TIMESTAMPTZ   NOT NULL,
+    completed_at           TIMESTAMPTZ,
     CONSTRAINT fk_tx_source_account FOREIGN KEY (source_account_id) REFERENCES accounts (id),
     CONSTRAINT fk_tx_destination_account FOREIGN KEY (destination_account_id) REFERENCES accounts (id),
     CONSTRAINT ck_tx_amount_positive CHECK (amount > 0)
@@ -32,7 +32,7 @@ CREATE TABLE ledger_entries (
     balance_before NUMERIC(19,4) NOT NULL,
     balance_after  NUMERIC(19,4) NOT NULL,
     narration      VARCHAR(255),
-    created_at     TIMESTAMP     NOT NULL,
+    created_at     TIMESTAMPTZ   NOT NULL,
     CONSTRAINT fk_ledger_transaction FOREIGN KEY (transaction_id) REFERENCES wallet_transactions (id),
     CONSTRAINT fk_ledger_account FOREIGN KEY (account_id) REFERENCES accounts (id),
     CONSTRAINT ck_ledger_amount_positive CHECK (amount > 0)
