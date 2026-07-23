@@ -20,7 +20,7 @@ without it.
 ### With Docker
 
 ```bash
-docker compose up          # PostgreSQL 16 + Redis 7 + the app, on port 9090
+docker compose up --build          # PostgreSQL 16 + Redis 7 + the app, on port 9090
 ```
 
 `docker compose` starts PostgreSQL, Redis and the application, and supplies every environment
