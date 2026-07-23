@@ -10,7 +10,7 @@ Built for the 3Line Limited Senior Backend Engineer assessment, on the provided 
 PostgreSQL is the only system of record, in development and in tests alike. Row-level
 `SELECT FOR UPDATE` is the mechanism that makes concurrent transfers correct, so the tests exercise
 the real thing rather than an in-memory substitute that only approximates it. Redis is a cache in
-front of read-heavy endpoints, and nothing depends on it for correctness — the application runs
+front of read-heavy endpoints, and nothing depends on it for correctness. The application runs
 without it.
 
 ---
@@ -47,7 +47,7 @@ Flyway creates the schema on first start. The app seeds two funded demo accounts
 printed in the log:
 
 ```
-Demo data ready: Ada=1000000012 (100000.00), Bola=1000000029 (50000.00)
+Demo data ready: Ada=1000000017 (100000.00), Bola=1000000024 (50000.00)
 ```
 
 | | |
@@ -59,7 +59,7 @@ Demo data ready: Ada=1000000012 (100000.00), Bola=1000000029 (50000.00)
 ### Configuration
 
 **All configuration comes from the environment. There are no defaults compiled into the
-application** — a missing variable stops the app at startup with a named error, rather than letting
+application** A missing variable stops the app at startup with a named error, rather than letting
 it quietly connect somewhere unintended. `.env.example` lists every one:
 
 | Variable | Purpose | Example |
@@ -81,6 +81,7 @@ it quietly connect somewhere unintended. `.env.example` lists every one:
 | `WALLET_MIN_TRANSFER_AMOUNT` / `WALLET_MAX_TRANSFER_AMOUNT` | Transfer limits | `0.01` / `1000000.00` |
 | `WALLET_LOCK_TIMEOUT_MS` | Row-lock wait before a transfer fails; **keep below `DB_CONNECTION_TIMEOUT_MS`** so lock waits cannot exhaust the pool | `5000` |
 | `WALLET_SEED_DEMO_DATA` | Seed two funded demo accounts at startup | `true` |
+| `WALLET_TIMEZONE` | Civil time zone for reference dates and statement day boundaries, and the zone responses render timestamps in. Optional; blank inherits the host `TZ` | `Africa/Lagos` |
 
 `.env` is gitignored; only `.env.example` is committed.
 
@@ -102,18 +103,9 @@ non-secret fallback so the workflow still runs on a fork where no secrets are co
 those two repository secrets is enough to take the fallback out of use entirely.
 
 In production none of this would be a static string. Credentials would come from a managed secret
-store — AWS Secrets Manager, GCP Secret Manager or Vault — resolved at startup, with the workload
-authenticating by short-lived OIDC federation rather than a long-lived key, and rotated on a
-schedule. The application already supports this without a code change, because every setting is read
-from the environment with no compiled-in default (see the table above): the secret store populates
-the environment, and a missing value stops the application at startup rather than letting it fall
-back to something unintended.
+store such as AWS Secrets Manager, GCP Secret Manager or Vault. 
 
 ## Running the tests
-
-The suite runs against a real PostgreSQL database. **It truncates tables between tests, so point it
-at a throwaway database** — never at one holding data you care about.
-
 ```bash
 createdb -O wallet wallet_test                        # once
 
@@ -121,11 +113,11 @@ export TEST_DB_URL=jdbc:postgresql://localhost:5432/wallet_test
 export TEST_DB_USERNAME=wallet
 export TEST_DB_PASSWORD=wallet
 
-./mvnw verify                                         # 45 tests
+./mvnw verify                                         # 48 tests
 ```
 
 Tests run with `CACHE_TYPE=none`, so **Redis is not needed to run them**. Caching is a performance
-concern, not a correctness one — the assertions are about money movement, and disabling the cache
+concern, not a correctness one. The assertions are about money movement, and disabling the cache
 keeps the suite deterministic. CI runs the same command against PostgreSQL and Redis service
 containers, then boots the application to confirm it starts against both.
 
@@ -192,17 +184,21 @@ Every response uses one envelope:
   "code": "SUCCESS",
   "message": "Transfer successful",
   "data": { "reference": "TRF-20260721-4B8B10A5", "status": "SUCCESS", "amount": 2500.00 },
-  "timestamp": "2026-07-21T17:41:05.727697Z",
+  "timestamp": "2026-07-21T18:41:05.727697+01:00",
   "correlationId": "0ad4f6ae"
 }
 ```
+
+Timestamps render in the configured application zone with an explicit offset (see `WALLET_TIMEZONE`).
 
 Failures carry a machine-readable code and never leak a stack trace:
 
 | Code | HTTP | Trigger |
 |---|---|---|
 | `VALIDATION_ERROR` | 400 | Field validation failed; per-field detail in `errors` |
+| `IDEMPOTENCY_KEY_REQUIRED` | 400 | A money moving request was sent with no `Idempotency-Key` header |
 | `ACCOUNT_NOT_FOUND` / `USER_NOT_FOUND` / `TRANSACTION_NOT_FOUND` | 404 | Unknown identifier |
+| `RESOURCE_NOT_FOUND` | 404 | Unknown route or missing static resource |
 | `DUPLICATE_USER` | 409 | Email or phone already registered |
 | `INSUFFICIENT_FUNDS` | 422 | Source balance below the amount |
 | `ACCOUNT_NOT_ACTIVE` | 422 | Frozen or closed account |
@@ -210,7 +206,7 @@ Failures carry a machine-readable code and never leak a stack trace:
 | `CURRENCY_MISMATCH` | 422 | Accounts hold different currencies |
 | `INTER_BANK_NOT_SUPPORTED` | 422 | Destination bank code is not this institution |
 | `TRANSFER_LIMIT_EXCEEDED` | 422 | Above the configured maximum |
-| `IDEMPOTENCY_KEY_REUSE` | 422 | Same key, different payload |
+| `IDEMPOTENCY_KEY_REUSE` | 409 | Same key, different payload |
 | `WALLET_LOCKED` | 503 | Lock wait exceeded; safe to retry |
 
 ---
@@ -255,6 +251,9 @@ It runs against a real PostgreSQL database, so it exercises genuine `SELECT FOR 
 The hard case is not the double click. It is a client that timed out and does not know whether the
 money moved.
 
+The `Idempotency-Key` header is required on transfer and funding requests. A request sent without it
+is rejected with `IDEMPOTENCY_KEY_REQUIRED`, so a caller cannot lose retry safety by omitting it.
+
 The receipt and the money movement **commit in the same database transaction**, which buys a
 guarantee worth more than any retry logic:
 
@@ -274,8 +273,9 @@ Other properties:
 - The key is stored under a **unique index**, so the guarantee is enforced by the database, not by
   an application check that would itself race. Two genuinely concurrent duplicates are arbitrated by
   the index; one commits and the other returns the committed receipt.
-- Requests are **fingerprinted**. Reusing a key with a different amount returns
-  `IDEMPOTENCY_KEY_REUSE` rather than silently replaying, which would mask a real second payment.
+- Requests are **fingerprinted** over the full payload (accounts, amount, narration and bank code).
+  Reusing a key with any changed field returns `IDEMPOTENCY_KEY_REUSE` rather than silently
+  replaying, which would mask a real second payment.
 - **Declines are idempotent too.** Retrying a key that was declined returns the decline, not a fresh
   attempt. A genuinely new attempt needs a new key.
 
@@ -292,7 +292,7 @@ balances are unchanged, no ledger entries survive, and no transaction row is lef
 
 ### Failed transfers are recorded, with the reason
 
-A decline is not a silent rejection — it is persisted:
+A decline is not a silent rejection. It is persisted:
 
 | reference | status | amount | failure_reason |
 |---|---|---|---|
@@ -306,13 +306,9 @@ ledger entries are written because no money moved.
 
 ### Account numbers: NUBAN
 
-10-digit account numbers are generated using the CBN NUBAN check-digit algorithm — a 9-digit serial
+10-digit account numbers are generated using the CBN NUBAN check-digit algorithm. a 9-digit serial
 drawn from a database sequence, with the check digit computed over the institution code and serial
 using the repeating `3,7,3` weight vector.
-
-The implementation is verified against a published vector (GTBank `058`, serial `001656322`, real
-NUBAN `0016563228`). A 13-digit variant of the algorithm that circulates in several blog posts gives
-the wrong check digit for that input and is rejected by the test suite.
 
 A sequence makes uniqueness structural rather than generate-and-retry-on-collision, and the check
 digit catches a mistyped account number before it reaches the database.
@@ -320,9 +316,8 @@ digit catches a mistyped account number before it reaches the database.
 ### A NUBAN is only unique within an institution
 
 The CBN standard specifies that the 10-digit NUBAN is unique **within each institution**, not
-globally — two banks can issue the same ten digits. So an account's identity is the composite
-`(institution_code, account_number)`, and that is what the unique index enforces. Looking an account
-up by number alone is not possible, because the index does not support it.
+globally so two banks can issue the same ten digits. An account's identity is the composite
+`(institution_code, account_number)`, and that is what the unique index enforces.
 
 This is also why `POST /transfers` accepts an optional `destinationBankCode`: omitted or matching
 ours means an internal transfer, anything else is refused with `INTER_BANK_NOT_SUPPORTED` rather
@@ -357,6 +352,15 @@ construction.
 `BigDecimal` throughout, stored as `NUMERIC(19,4)`. Never a float. The API accepts two decimal
 places and **rejects** greater precision rather than silently rounding it.
 
+### Timestamps
+
+Every timestamp is stored as PostgreSQL `timestamptz` using `java.time.Instant`, an absolute moment
+independent of any zone, so the database records the same value no matter where the service runs.
+Responses render each timestamp in the configured application zone with an explicit offset, for
+example `2026-07-23T14:06:38.501+01:00`. The zone comes from `WALLET_TIMEZONE`, falling back to the
+host `TZ`, and it also drives civil dates such as the reference `TRF-20260723-...` and statement day
+boundaries. A single injected `Clock` is the one source of time, so tests can fix it.
+
 ### Caching
 
 Redis, shared across every application instance. The governing rule:
@@ -368,31 +372,6 @@ Redis, shared across every application instance. The governing rule:
 | Name enquiry | **Yes**, 5 min | The highest-volume read in the system — a client resolves a name before every transfer, often several times while a user types |
 | Account detail | **Yes**, 5 min | Read-heavy, and changes rarely |
 | **Balance used to authorise a debit** | **Never** | Read from the primary, under a row lock, inside the transaction |
-
-The last row is the important one. A cached balance behind a debit decision is how double-spends
-get built, so the *authorization balance* and the *display balance* are treated as different things:
-the balance endpoint reads the database every time.
-
-Caching an account's `status` is still safe even though a frozen account could briefly appear
-`ACTIVE` in the cache, because `LedgerService` re-reads the status from the locked row inside the
-transaction before moving any money. The cache can therefore only reject a request earlier than the
-database would — never approve one it shouldn't.
-
-Redis rather than an in-process cache is a deliberate choice for horizontal scale. An in-process
-cache is per-instance: with N instances you get N cold caches, N times the database load on a
-restart, and instances disagreeing with each other. The cost is a network hop per lookup, which is
-the right trade at this read volume but would not be for something called once per request.
-
-**Redis being down does not take the wallet down.** A `CacheErrorHandler` degrades every cache
-failure — read, write, evict, clear — to a logged warning and a database read. Spring's default is
-to propagate the exception, which would turn a cache outage into a full outage.
-
-Two further details for high volume: `@Cacheable(sync = true)` collapses concurrent misses on the
-same key so a cold hot key produces one database query rather than hundreds, and values are
-serialised as JSON with a type allow-list restricted to this application's own packages, since
-unrestricted polymorphic deserialisation from a cache is a known remote-code-execution vector if the
-store is ever compromised.
-
 ---
 
 ## Design decisions
@@ -472,7 +451,7 @@ The base package `com.example.test` and the Maven coordinates were kept as provi
 
 ```
 src/main/java/com/example/test
-├── config/          WalletProperties, OpenAPI, Redis cache, demo seeder
+├── config/          WalletProperties, OpenAPI, Redis cache, time (Clock), Jackson, demo seeder
 ├── common/          ApiResponse envelope, correlation-id filter, Money
 ├── controller/      Users, Accounts, Transfers
 ├── dto/             Request and response records
@@ -489,12 +468,9 @@ src/main/java/com/example/test
 src/main/resources/db/migration    V1 core tables · V2 ledger · V3 house account
 ```
 
-`DESIGN.md` in this repository has the fuller design write-up: the skeleton audit, the scale and
-failure-mode analysis, the full race-condition inventory, and the indexing rationale.
-
 ## Tests
 
-45 tests: 13 unit, 32 integration.
+48 tests: 14 unit, 34 integration.
 
 ### Unit — no Spring context, no database
 
@@ -502,26 +478,16 @@ failure-mode analysis, the full race-condition inventory, and the indexing ratio
 |---|---|---|
 | `NubanGeneratorTest` | 10 | Check digit against the published CBN vector; the incorrect 13-digit variant rejected; mistyped numbers caught; the 9-digit serial range enforced |
 | `TransactionProcessorFactoryTest` | 3 | The right processor resolves per transaction type; duplicate and missing registrations fail loudly |
+| `JacksonConfigTest` | 1 | An `Instant` renders in the configured zone with an explicit offset |
 
 ### Integration — `@SpringBootTest` against a real PostgreSQL database
 
 | Test | Count | What it proves |
 |---|---|---|
-| `TransferIntegrationTest` | 14 | Full HTTP surface: happy path, declines, validation, foreign bank code, name enquiry, statement, funding |
+| `TransferIntegrationTest` | 16 | Full HTTP surface: happy path, declines, validation, foreign bank code, name enquiry, statement, statement size bounds, funding |
 | `IdempotencyTest` | 5 | Replay returns the original receipt; no double debit; key reuse with a changed payload rejected; a declined key stays declined; unknown outcome resolvable by key |
 | `AccountResolutionTest` | 4 | The same NUBAN under two institution codes is two different accounts |
 | `LedgerInvariantTest` | 4 | Books sum to zero; cached balance equals the ledger for every account; every entry carries its running balance |
 | `TransactionRollbackTest` | 3 | A failure mid-ledger reverts the debit, the credit and the transaction row; unbalanced legs write nothing |
 | `ConcurrentTransferTest` | 2 | 200 simultaneous bidirectional transfers conserve every kobo, never deadlock and never overdraw, under real row locks |
 
-The concurrency, idempotency and rollback tests are the ones worth reading first.
-
-The balance is deliberate. Concurrency, transaction rollback and idempotency cannot be demonstrated
-with mocks — a mocked repository will happily pretend two threads never collided. Those properties
-are the ones this system lives or dies by, so they are tested against a real database and real row
-locks, and the suite is weighted accordingly.
-
-The gap this leaves, stated plainly: the pure validation rules — insufficient funds, same-account,
-transfer limits, currency mismatch — are currently exercised through the full HTTP stack rather than
-by fast isolated unit tests of the service layer. That is slower feedback than it needs to be, and a
-mocked `TransferProcessor` suite would be the first thing to add next.

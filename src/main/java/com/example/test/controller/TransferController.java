@@ -3,6 +3,7 @@ package com.example.test.controller;
 import com.example.test.common.ApiResponse;
 import com.example.test.dto.TransactionResponse;
 import com.example.test.dto.TransferRequest;
+import com.example.test.exception.WalletException;
 import com.example.test.service.TransactionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -27,11 +28,15 @@ public class TransferController {
 
     @PostMapping
     @Operation(summary = "Transfer funds between two accounts",
-            description = "Send an Idempotency-Key header to make retries safe. "
-                    + "Replaying a key returns the original outcome instead of moving money again.")
+            description = "A client-generated Idempotency-Key header is required and makes retries safe: "
+                    + "reuse the same key on every retry, and replaying it returns the original outcome "
+                    + "instead of moving money again.")
     public ResponseEntity<ApiResponse<TransactionResponse>> transfer(
             @Valid @RequestBody TransferRequest request,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+            @RequestHeader(value = "Idempotency-Key", required = true) String idempotencyKey) {
+        if (idempotencyKey.isBlank()) {
+            throw WalletException.idempotencyKeyRequired();
+        }
         TransactionResponse response = transactionService.transfer(request, idempotencyKey);
         return ResponseEntity.ok(ApiResponse.ok(response, "Transfer successful"));
     }

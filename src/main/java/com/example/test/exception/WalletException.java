@@ -68,6 +68,11 @@ public class WalletException extends RuntimeException {
                 "Idempotency key %s was already used with a different request payload".formatted(key));
     }
 
+    public static WalletException idempotencyKeyRequired() {
+        return new WalletException(ErrorCode.IDEMPOTENCY_KEY_REQUIRED,
+                "An Idempotency-Key header is required for money-moving requests");
+    }
+
     public static WalletException unbalancedLedger() {
         return new WalletException(ErrorCode.UNBALANCED_LEDGER,
                 "Ledger entries do not balance to zero");

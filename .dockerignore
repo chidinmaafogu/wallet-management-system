@@ -1,0 +1,20 @@
+# Build output — the image builds its own jar in the multi-stage build
+target/
+
+# Secrets and local env — never send these into the build context
+.env
+.env.*
+!.env.example
+
+# VCS and IDE
+.git/
+.gitignore
+.idea/
+*.iml
+.vscode/
+
+# Docs and local tooling that the build does not need
+*.md
+docker-compose.yml
+Dockerfile
+.dockerignore

@@ -41,6 +41,7 @@ import java.util.concurrent.atomic.AtomicInteger;
         "WALLET_LOCK_TIMEOUT_MS=5000",
         "WALLET_CACHE_TTL_SECONDS=300",
         "WALLET_SEED_DEMO_DATA=false",
+        "WALLET_TIMEZONE=Africa/Lagos",
         "CACHE_TYPE=none",
         "REDIS_HOST=localhost",
         "REDIS_PORT=6379",

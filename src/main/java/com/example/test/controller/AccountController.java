@@ -8,6 +8,7 @@ import com.example.test.dto.FundAccountRequest;
 import com.example.test.dto.NameEnquiryResponse;
 import com.example.test.dto.StatementResponse;
 import com.example.test.dto.TransactionResponse;
+import com.example.test.exception.WalletException;
 import com.example.test.service.TransactionService;
 import com.example.test.service.UserAccountService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -80,11 +81,15 @@ public class AccountController {
 
     @PostMapping("/{accountNumber}/fund")
     @Operation(summary = "Fund an account",
-            description = "Simulates an inbound credit. Booked as a double-entry movement from the house account.")
+            description = "Simulates an inbound credit. Booked as a double-entry movement from the house account. "
+                    + "A client-generated Idempotency-Key header is required; reuse the same key on every retry.")
     public ResponseEntity<ApiResponse<TransactionResponse>> fund(
             @PathVariable String accountNumber,
             @Valid @RequestBody FundAccountRequest request,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+            @RequestHeader(value = "Idempotency-Key", required = true) String idempotencyKey) {
+        if (idempotencyKey.isBlank()) {
+            throw WalletException.idempotencyKeyRequired();
+        }
         TransactionResponse response = transactionService.fund(accountNumber, request, idempotencyKey);
         return ResponseEntity.ok(ApiResponse.ok(response, "Account funded"));
     }

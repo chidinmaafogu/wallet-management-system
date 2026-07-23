@@ -66,7 +66,9 @@ class TransferIntegrationTest extends WalletTestSupport {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.amount").value(500.00))
-                .andExpect(jsonPath("$.data.reference").isNotEmpty());
+                .andExpect(jsonPath("$.data.reference").isNotEmpty())
+                .andExpect(jsonPath("$.data.createdAt").value(org.hamcrest.Matchers.endsWith("+01:00")))
+                .andExpect(jsonPath("$.data.completedAt").value(org.hamcrest.Matchers.endsWith("+01:00")));
 
         assertThat(balanceOf(source)).isEqualByComparingTo("1500.00");
         assertThat(balanceOf(destination)).isEqualByComparingTo("500.00");
@@ -107,6 +109,7 @@ class TransferIntegrationTest extends WalletTestSupport {
 
         mockMvc.perform(post("/api/v1/transfers")
                         .contentType("application/json")
+                        .header("Idempotency-Key", "same-account")
                         .content(json(new TransferRequest(
                                 account, account, null, new BigDecimal("100.00"), "Self"))))
                 .andExpect(status().isUnprocessableEntity())
@@ -119,6 +122,7 @@ class TransferIntegrationTest extends WalletTestSupport {
 
         mockMvc.perform(post("/api/v1/transfers")
                         .contentType("application/json")
+                        .header("Idempotency-Key", "unknown-destination")
                         .content(json(new TransferRequest(
                                 source, "9999999999", null, new BigDecimal("100.00"), "Nowhere"))))
                 .andExpect(status().isNotFound())
@@ -132,6 +136,7 @@ class TransferIntegrationTest extends WalletTestSupport {
 
         mockMvc.perform(post("/api/v1/transfers")
                         .contentType("application/json")
+                        .header("Idempotency-Key", "foreign-bank")
                         .content(json(new TransferRequest(
                                 source, destination, "000058", new BigDecimal("100.00"), "Other bank"))))
                 .andExpect(status().isUnprocessableEntity())
@@ -147,6 +152,7 @@ class TransferIntegrationTest extends WalletTestSupport {
 
         mockMvc.perform(post("/api/v1/transfers")
                         .contentType("application/json")
+                        .header("Idempotency-Key", "too-precise")
                         .content(json(new TransferRequest(
                                 source, destination, null, new BigDecimal("10.005"), "Too precise"))))
                 .andExpect(status().isBadRequest())
@@ -161,6 +167,7 @@ class TransferIntegrationTest extends WalletTestSupport {
 
         mockMvc.perform(post("/api/v1/transfers")
                         .contentType("application/json")
+                        .header("Idempotency-Key", "non-positive")
                         .content(json(new TransferRequest(
                                 source, destination, null, new BigDecimal("0.00"), "Nothing"))))
                 .andExpect(status().isBadRequest())
@@ -173,6 +180,7 @@ class TransferIntegrationTest extends WalletTestSupport {
 
         mockMvc.perform(post("/api/v1/accounts/" + account + "/fund")
                         .contentType("application/json")
+                        .header("Idempotency-Key", "fund-house-account")
                         .content(json(new FundAccountRequest(new BigDecimal("10000.00"), "Deposit"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.type").value("FUNDING"));
@@ -209,6 +217,24 @@ class TransferIntegrationTest extends WalletTestSupport {
                 .andExpect(jsonPath("$.data.entries.length()").value(3))
                 .andExpect(jsonPath("$.data.entries[0].narration").value("Second"))
                 .andExpect(jsonPath("$.data.entries[0].direction").value("DEBIT"));
+    }
+
+    @Test
+    void rejectsStatementSizeAboveTheMaximumWith400() throws Exception {
+        String account = newFundedAccount("100.00");
+
+        mockMvc.perform(get("/api/v1/accounts/" + account + "/statement").param("size", "101"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void rejectsStatementSizeBelowTheMinimumWith400() throws Exception {
+        String account = newFundedAccount("100.00");
+
+        mockMvc.perform(get("/api/v1/accounts/" + account + "/statement").param("size", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
 
     @Test

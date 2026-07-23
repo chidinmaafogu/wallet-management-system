@@ -25,6 +25,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.HexFormat;
@@ -45,6 +46,7 @@ public class DefaultTransactionService implements TransactionService {
     private final WalletTransactionRepo walletTransactionRepo;
     private final WalletBalanceRepo walletBalanceRepo;
     private final WalletProperties properties;
+    private final Clock clock;
 
     @Override
     public TransactionResponse transfer(TransferRequest request, String idempotencyKey) {
@@ -52,8 +54,9 @@ public class DefaultTransactionService implements TransactionService {
             throw WalletException.interBankNotSupported(request.destinationBankCode());
         }
 
-        String requestHash = hash("TRANSFER", request.sourceAccountNumber(),
-                request.destinationAccountNumber(), request.amount().toPlainString());
+               String requestHash = hash("TRANSFER", request.sourceAccountNumber(),
+                request.destinationAccountNumber(), request.destinationBankCode(),
+                request.amount().toPlainString(), request.narration());
 
         Optional<TransactionResponse> replay = replayIfPresent(idempotencyKey, requestHash);
         if (replay.isPresent()) {
@@ -81,7 +84,8 @@ public class DefaultTransactionService implements TransactionService {
 
     @Override
     public TransactionResponse fund(String accountNumber, FundAccountRequest request, String idempotencyKey) {
-        String requestHash = hash("FUNDING", accountNumber, request.amount().toPlainString());
+        String requestHash = hash("FUNDING", accountNumber,
+                request.amount().toPlainString(), request.narration());
 
         Optional<TransactionResponse> replay = replayIfPresent(idempotencyKey, requestHash);
         if (replay.isPresent()) {
@@ -173,7 +177,7 @@ public class DefaultTransactionService implements TransactionService {
     private String reference(String prefix) {
         return "%s-%s-%s".formatted(
                 prefix,
-                LocalDate.now().format(REFERENCE_DATE),
+                LocalDate.now(clock).format(REFERENCE_DATE),
                 UUID.randomUUID().toString().substring(0, 8).toUpperCase());
     }
 
